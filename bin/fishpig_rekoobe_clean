@@ -26,19 +26,30 @@ try {
         }
 
         foreach (glob($dir . '/*/Helper/License.php') as $file) {
-            $data = file_get_contents($file);
+            $data = $odata = file_get_contents($file);
             if (!preg_match('/function ([a-z0-9]{4})\(\$a\)\{eval\(/', $data, $m)) {
                 continue;
             }
 
             $evalMethod = $m[1];
-            $newEvalMethod = substr($evalMethod, 0, 2) . '_' . $it++;
-            $newEvalMethodIgnore = substr($evalMethod, 0, 2) . '_' . $it++;
+            $newEvalMethod = 'X'.str_pad($it++, 3, '_', STR_PAD_LEFT);
+            $newEvalMethodIgnore = 'X'.str_pad($it++, 3, '_', STR_PAD_LEFT);
             $cacheFile = $cacheDir . '/' . md5($file . md5_file($file) . $evalMethod . $newEvalMethod) . '.php';
             $data = str_replace('function ' . $evalMethod . '(', 'function ' . $newEvalMethodIgnore . '(', $data);
             $data = str_replace($evalMethod . '(', $newEvalMethod . '(', $data);
+
+            if (!is_dir(dirname($cacheFile))) {
+                mkdir(dirname($cacheFile), 0755, true);
+
+                if (!is_dir(dirname($cacheFile))) {
+                    throw new \Exception(
+                        'Cannot create cache dir at ' . dirname($cacheFile)
+                    );
+                }
+            }
+
             file_put_contents($cacheFile, $data);
-            eval('function ' . $newEvalMethod . '($a){echo $a;if(strpos($a,\'AbstractHelper\')===false){eval($a);}}');
+            eval('function ' . $newEvalMethod . '($a){echo $a . PHP_EOL. PHP_EOL;if(strpos($a,\'AbstractHelper\')===false){eval($a);}}');
             ob_start();
             include $cacheFile;
             $output = ob_get_clean();
