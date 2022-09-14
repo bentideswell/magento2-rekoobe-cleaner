@@ -1,0 +1,8 @@
+{
+    "name": "fishpig/magento2-rekoobe-cleaner",
+    "description": "Clean up a FishPig Rekoobe infection.",
+    "version": "1.0.0",
+    "bin": [
+        "bin/fishpig_rekoobe_clean"
+    ]
+}

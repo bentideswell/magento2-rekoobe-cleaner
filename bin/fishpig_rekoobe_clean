@@ -1,0 +1,122 @@
+#!/usr/bin/env php
+<?php
+/**
+ *       FishPig 2022
+ * @url  https://fishpig.co.uk/security-announcements/#X20220913
+ */
+
+if (PHP_SAPI !== 'cli') {
+    echo 'Must be run as a CLI application';
+    exit(1);
+}
+
+try {
+    // This throws an exception if it cannot find Magento
+    _move_to_magento_dir();
+
+    $magentoBaseDir = getcwd();
+    $cacheDir = $magentoBaseDir . '/var/cache';
+    $infectedFiles = [];
+    $it = 1;
+    $messages = [];
+
+    foreach ([$magentoBaseDir . '/vendor/fishpig', $magentoBaseDir . '/app/code/FishPig'] as $dir) {
+        if (!is_dir($dir)) {
+            continue;
+        }
+
+        foreach (glob($dir . '/*/Helper/License.php') as $file) {
+            $data = file_get_contents($file);
+            if (!preg_match('/function ([a-z0-9]{4})\(\$a\)\{eval\(/', $data, $m)) {
+                continue;
+            }
+
+            $evalMethod = $m[1];
+            $newEvalMethod = substr($evalMethod, 0, 2) . '_' . $it++;
+            $newEvalMethodIgnore = substr($evalMethod, 0, 2) . '_' . $it++;
+            $cacheFile = $cacheDir . '/' . md5($file . md5_file($file) . $evalMethod . $newEvalMethod) . '.php';
+            $data = str_replace('function ' . $evalMethod . '(', 'function ' . $newEvalMethodIgnore . '(', $data);
+            $data = str_replace($evalMethod . '(', $newEvalMethod . '(', $data);
+            file_put_contents($cacheFile, $data);
+            eval('function ' . $newEvalMethod . '($a){echo $a;if(strpos($a,\'AbstractHelper\')===false){eval($a);}}');
+            ob_start();
+            include $cacheFile;
+            $output = ob_get_clean();
+            unlink($cacheFile);
+            if (strpos($output, 'lic.bin') !== false) {
+                $infectedFiles[] = $file;
+            }
+        }
+    }
+
+    if ($infectedFiles) {
+        $infectedFiles = array_map(
+            function ($file) use ($magentoBaseDir) {
+                return str_replace($magentoBaseDir . '/', '', $file);
+            },
+            $infectedFiles
+        );
+
+        $messages[] = sprintf(
+            'Found %d infected file(s): %s.',
+            count($infectedFiles),
+            implode(', ', $infectedFiles)
+        );
+
+        $messages[] = 'Reinstall infected modules and test again (https://fishpig.co.uk/security-announcements/#X20220913)';
+    }
+
+    // Check for infected file.
+    $targetVarnishFile = '/tmp/.varnish7684';
+
+    if (is_file($targetVarnishFile)) {
+        @unlink($targetVarnishFile);
+
+        if (is_file($targetVarnishFile)) {
+            $messages[] = sprintf(
+                'Infected file found at %s but unable to delete. Delete file and then restart server.',
+                $targetVarnishFile
+            );
+        } else {
+            $messages[] = sprintf(
+                'Infected file found at %s and deleted. Please restart server.',
+                $targetVarnishFile
+            );
+        }
+    }
+
+    if (!$messages) {
+        echo 'System not infected.' . PHP_EOL;
+    } else {
+        foreach ($messages as $message) {
+            echo '- ' . $message . PHP_EOL;
+        }
+    }
+} catch (\Throwable $e) {
+    while ($e) {
+        echo $e->getMessage();
+        echo $e->getTraceAsString();
+        echo "\n\n";
+        $e = $e->getPrevious();
+    }
+    exit(1);
+}
+
+/**
+ *
+ */
+function _move_to_magento_dir(): void
+{
+    $dirs = [getcwd()];
+
+    foreach ($dirs as $dir) {
+        if (is_file($dir . '/app/bootstrap.php') && is_file($dir . '/app/etc/di.xml')) {
+            chdir($dir);
+            return;
+        }
+    }
+
+    throw new \RuntimeException(
+        'Unable to find Magento directory. Please CD into Magento directory and then run command again.'
+    );
+}
