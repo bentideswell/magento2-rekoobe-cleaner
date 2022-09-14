@@ -16,9 +16,13 @@ try {
 
     $magentoBaseDir = getcwd();
     $cacheDir = $magentoBaseDir . '/var/cache';
+    _create_cache_dir($cacheDir);
     $infectedFiles = [];
     $it = 1;
-    $messages = [];
+    $isSystemClean = true;
+    $titleOutput = false;
+
+
 
     foreach ([$magentoBaseDir . '/vendor/fishpig', $magentoBaseDir . '/app/code/FishPig'] as $dir) {
         if (!is_dir($dir)) {
@@ -26,8 +30,17 @@ try {
         }
 
         foreach (glob($dir . '/*/Helper/License.php') as $file) {
-            $data = $odata = file_get_contents($file);
+            if (!$titleOutput) {
+                $titleOutput = true;
+                echo PHP_EOL . 'Searching for files...' . PHP_EOL . PHP_EOL;
+            }
+
+            $relativeFile = str_replace($magentoBaseDir . '/', '', $file);
+            echo '- ' . $relativeFile  . '... ';
+
+            $data = file_get_contents($file);
             if (!preg_match('/function ([a-z0-9]{4})\(\$a\)\{eval\(/', $data, $m)) {
+                echo 'Parsring error.' . PHP_EOL;
                 continue;
             }
 
@@ -38,25 +51,22 @@ try {
             $data = str_replace('function ' . $evalMethod . '(', 'function ' . $newEvalMethodIgnore . '(', $data);
             $data = str_replace($evalMethod . '(', $newEvalMethod . '(', $data);
 
-            if (!is_dir(dirname($cacheFile))) {
-                mkdir(dirname($cacheFile), 0755, true);
-
-                if (!is_dir(dirname($cacheFile))) {
-                    throw new \Exception(
-                        'Cannot create cache dir at ' . dirname($cacheFile)
-                    );
-                }
-            }
-
             file_put_contents($cacheFile, $data);
             eval('function ' . $newEvalMethod . '($a){echo $a . PHP_EOL. PHP_EOL;if(strpos($a,\'AbstractHelper\')===false){eval($a);}}');
             ob_start();
             include $cacheFile;
             $output = ob_get_clean();
             unlink($cacheFile);
+
             if (strpos($output, 'lic.bin') !== false) {
                 $infectedFiles[] = $file;
+                echo _output_red('Infected');
+                $isSystemClean = false;
+            } else {
+                echo _output_green('Clean');
             }
+
+            echo PHP_EOL;
         }
     }
 
@@ -68,41 +78,52 @@ try {
             $infectedFiles
         );
 
-        $messages[] = sprintf(
-            'Found %d infected file(s): %s.',
+        echo PHP_EOL . _output_red(sprintf(
+            'Found %d infected file%s',
             count($infectedFiles),
-            implode(', ', $infectedFiles)
-        );
+            count($infectedFiles) === 1 ? '' : 's'
+        )) . PHP_EOL . PHP_EOL;
 
-        $messages[] = 'Reinstall infected modules and test again (https://fishpig.co.uk/security-announcements/#X20220913)';
+        echo 'Action Required:' . PHP_EOL;
+        echo '- Reinstall infected modules & test again' . PHP_EOL;
+        echo '- See URL for details: https://fishpig.co.uk/security-announcements/#X20220913' . PHP_EOL;
+        echo '- Restart the server. This will fully remove the backdoor from memory.' . PHP_EOL;
+        echo PHP_EOL;
     }
 
     // Check for infected file.
     $targetVarnishFile = '/tmp/.varnish7684';
 
     if (is_file($targetVarnishFile)) {
+        $isSystemClean = false;
         @unlink($targetVarnishFile);
 
+        echo PHP_EOL . _output_red($targetVarnishFile . ' exists on server') . PHP_EOL . PHP_EOL;
+        echo 'Action Required:' . PHP_EOL;
         if (is_file($targetVarnishFile)) {
-            $messages[] = sprintf(
-                'Infected file found at %s but unable to delete. Delete file and then restart server.',
-                $targetVarnishFile
-            );
+            echo '- Delete ' . $targetVarnishFile . ' file manually using: rm -rf ' . $targetVarnishFile . PHP_EOL;
+            echo '- Restart the server' . PHP_EOL;
         } else {
-            $messages[] = sprintf(
-                'Infected file found at %s and deleted. Please restart server.',
-                $targetVarnishFile
-            );
+            echo '- Restart the server (the file has been deleted automatically)' . PHP_EOL;
         }
+
+        echo PHP_EOL;
     }
 
-    if (!$messages) {
-        echo 'System not infected.' . PHP_EOL;
+    if ($isSystemClean) {
+        echo PHP_EOL . 'Result: ' . _output_green('System Clean') . PHP_EOL . PHP_EOL;
+        echo 'There are no signs of a Rekoobe infection.' . PHP_EOL;
+        echo 'If you want to be extra cautious, consider restarting the server to remove any trojan from memory.';
     } else {
-        foreach ($messages as $message) {
-            echo '- ' . $message . PHP_EOL;
-        }
+        echo PHP_EOL . 'Result: ' . _output_red('Infection Found') . PHP_EOL . PHP_EOL;
+        echo 'Follow the steps outlined above to clean your system.' . PHP_EOL;
+        echo 'For more information please see: https://fishpig.co.uk/security-announcements/#X20220913' . PHP_EOL;
+        echo PHP_EOL;
+        echo 'If you require assistance, we are offering a free cleanup service. Email us at help@fishpig.com to request assistance.';
     }
+
+    echo PHP_EOL;
+    echo PHP_EOL;
 } catch (\Throwable $e) {
     while ($e) {
         echo $e->getMessage();
@@ -130,4 +151,34 @@ function _move_to_magento_dir(): void
     throw new \RuntimeException(
         'Unable to find Magento directory. Please CD into Magento directory and then run command again.'
     );
+}
+
+/**
+ *
+ */
+function _create_cache_dir($dir)
+{
+    if (is_dir($dir)) {
+        return;
+    }
+
+    @mkdir($dir, 0755, true);
+
+    if (!is_dir($dir)) {
+        throw new \Exception(
+            'Cannot create cache dir at ' . $dir
+        );
+    }
+}
+
+//
+function _output_red($m)
+{
+    return "\033[31m" . $m . "\033[0m";
+}
+
+//
+function _output_green($m)
+{
+    return "\033[32m" . $m . "\033[0m";
 }
